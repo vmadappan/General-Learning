@@ -1,0 +1,125 @@
+
+A loopback device is ideal for this. You can create a virtual disk as a regular file, 
+put an ext4 filesystem on it, and run e2fsck against it without touching a physical partition.
+
+Simplest approach
+
+Create a 200 MB virtual disk:
+
+dd if=/dev/zero of=e2fck_play.img bs=1M count=200
+------------------------------------------
+venkat@bwsl501:~/backup_recovery$ dd if=/dev/zero of=e2fck_play.img bs=1M count=100
+100+0 records in
+100+0 records out
+104857600 bytes (105 MB, 100 MiB) copied, 0.0546339 s, 1.9 GB/s
+-----------------------------------------
+Format it as ext4:
+sudo mkfs.ext4 test.img
+-----------------------------------------
+venkat@bwsl501:~/backup_recovery$ sudo mkfs.ext4 e2fck_play.img
+[sudo] password for venkat: 
+mke2fs 1.46.5 (30-Dec-2021)
+Discarding device blocks: done                            
+Creating filesystem with 25600 4k blocks and 25600 inodes
+
+Allocating group tables: done                            
+Writing inode tables: done                            
+Creating journal (1024 blocks): done
+Writing superblocks and filesystem accounting information: done
+-----------------------------------------
+Run sudo e2fsck -f e2fck_play.img, to recover the partition
+-----------------------------------------
+venkat@bwsl501:~/backup_recovery$ sudo e2fsck -f e2fck_play.img
+e2fsck 1.46.5 (30-Dec-2021)
+Pass 1: Checking inodes, blocks, and sizes
+Pass 2: Checking directory structure
+Pass 3: Checking directory connectivity
+Pass 4: Checking reference counts
+Pass 5: Checking group summary information
+e2fck_play.img: 11/25600 files (9.1% non-contiguous), 2646/25600 blocks
+-----------------------------------------
+-----------------------------------------
+-----------------------------------------
+-----------------------------------------
+
+
+File system Corruption
+venkat@bwsl501:~/backup_recovery$ findmnt /dev/loop3
+venkat@bwsl501:~/backup_recovery$ sudo mkdir -p /mnt/bkp_rec
+venkat@bwsl501:~/backup_recovery$ sudo mount /dev/loop3 /mnt/bkp_rec
+venkat@bwsl501:~/backup_recovery$ echo "e2fsck corruption test" | sudo tee /mnt/bkp_rec/testfile.txt
+e2fsck corruption test
+venkat@bwsl501:~/backup_recovery$ sync
+venkat@bwsl501:~/backup_recovery$ sudo umount /mnt/bkp_rec
+venkat@bwsl501:~/backup_recovery$ sudo debugfs /dev/loop3
+debugfs 1.46.5 (30-Dec-2021)
+debugfs:  stat /testfile.txt
+debugfs:  quit
+venkat@bwsl501:~/backup_recovery$ sudo debugfs -w /dev/loop3
+debugfs 1.46.5 (30-Dec-2021)
+debugfs:  stat /testfile.txt
+debugfs:  unlink /testfile.txt
+debugfs:  quit
+venkat@bwsl501:~/backup_recovery$ 
+
+
+venkat@bwsl501:~/backup_recovery$ cp e2fck_play.img e2fsck_test.img
+venkat@bwsl501:~/backup_recovery$ sudo losetup --find --show e2fsck_test.img
+/dev/loop43
+venkat@bwsl501:~/backup_recovery$ sudo mkfs.ext4 /dev/loop43
+mke2fs 1.46.5 (30-Dec-2021)
+/dev/loop43 contains a ext4 file system
+	last mounted on /mnt/bkp_rec on Thu Oct  8 12:00:16 2026
+Proceed anyway? (y,N) y
+Discarding device blocks: done                            
+Creating filesystem with 25600 4k blocks and 25600 inodes
+
+Allocating group tables: done                            
+Writing inode tables: done                            
+Creating journal (1024 blocks): done
+Writing superblocks and filesystem accounting information: done
+
+venkat@bwsl501:~/backup_recovery$ sudo mount /dev/loop43 /mnt/bkp_rec
+venkat@bwsl501:~/backup_recovery$ echo "e2fsck corruption test" | sudo tee /mnt/bkp_rec/testfile.txt
+e2fsck corruption test
+venkat@bwsl501:~/backup_recovery$ sync
+venkat@bwsl501:~/backup_recovery$ cat /mnt/bkp_rec/testfile.txt
+e2fsck corruption test
+venkat@bwsl501:~/backup_recovery$ sudo umount /mnt/bkp_rec
+venkat@bwsl501:~/backup_recovery$ sudo debugfs /dev/loop43 -R "stat /testfile.txt"
+debugfs 1.46.5 (30-Dec-2021)
+venkat@bwsl501:~/backup_recovery$ sudo debugfs /dev/loop4 -R "stat <12>"
+debugfs 1.46.5 (30-Dec-2021)
+debugfs: Bad magic number in super-block while trying to open /dev/loop4
+/dev/loop4 contains a squashfs file system
+stat: Filesystem not open
+venkat@bwsl501:~/backup_recovery$ sudo debugfs /dev/loop43 -R "stat <12>"
+debugfs 1.46.5 (30-Dec-2021)
+venkat@bwsl501:~/backup_recovery$ sudo debugfs -w /dev/loop43
+debugfs 1.46.5 (30-Dec-2021)
+debugfs:  set_inode_field <12> blocks 0
+debugfs:  stat <12>
+debugfs:  exit
+debugfs: Unknown request "exit".  Type "?" for a request list.
+debugfs:  quit
+venkat@bwsl501:~/backup_recovery$ sudo e2fsck -f /dev/loop4
+e2fsck 1.46.5 (30-Dec-2021)
+Warning!  /dev/loop4 is mounted.
+e2fsck: Operation not permitted while trying to open /dev/loop4
+You must have r/w access to the filesystem or be root
+venkat@bwsl501:~/backup_recovery$ sudo umount /mnt/bkp_rec
+umount: /mnt/bkp_rec: not mounted.
+venkat@bwsl501:~/backup_recovery$ sudo e2fsck -f /dev/loop43
+e2fsck 1.46.5 (30-Dec-2021)
+Pass 1: Checking inodes, blocks, and sizes
+Inode 12, i_blocks is 0, should be 8.  Fix<y>? yes
+Pass 2: Checking directory structure
+Pass 3: Checking directory connectivity
+Pass 4: Checking reference counts
+Pass 5: Checking group summary information
+
+/dev/loop43: ***** FILE SYSTEM WAS MODIFIED *****
+/dev/loop43: 12/25600 files (8.3% non-contiguous), 2647/25600 blocks
+venkat@bwsl501:~/backup_recovery$ sudo mount /dev/loop43 /mnt/bkp_rec
+venkat@bwsl501:~/backup_recovery$ cat /mnt/bkp_rec/testfile.txt
+e2fsck corruption test
